@@ -291,4 +291,4 @@ steam-analytics/
 - [x] Interactive Streamlit dashboard (dark theme, sample reviews, SQL explorer, model evaluation, backend toggle, game media)
 - [x] One-command incremental update pipeline
 - [x] Second case-study game (Marvel Rivals)
-- [x] Cloud-hosted dashboard (Looker Studio) - in progress
+- [x] Cloud-hosted dashboard (Looker Studio) 
