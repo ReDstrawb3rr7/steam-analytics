@@ -6,9 +6,20 @@ Palworld (an "Overwhelmingly Positive" paid survival game) and Marvel
 Rivals (a "Mostly Positive" free-to-play hero shooter with a much larger
 negative-review base).
 
+> **This is a snapshot, not a fixed result.** Every number below reflects
+> the dataset at the time these runs were recorded. `update_data.py`
+> retrains the model on the full corpus every time it runs, so adding
+> more games or fresh reviews will shift these figures. That is expected
+> and correct, since the whole point of the pipeline is to keep working
+> on growing, real data. Re-run `python analysis/recommendation_model.py`
+> at any time to see current numbers. This document is the single place
+> current figures live. Other project files link here rather than
+> repeating numbers that could drift out of sync.
+
 All numbers come from the pipeline in this repo and are reproducible by
-running it. Model metrics below reflect the Palworld-era training runs
-noted in each section.
+running it. Model metrics in section 4 reflect the combined two-game
+dataset. Time-series and volume findings in sections 1 and 2 are
+specific to Palworld's own history, as noted in each section.
 
 ## 1. A launch drives attention, not opinion
 

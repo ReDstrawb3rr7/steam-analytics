@@ -1,5 +1,7 @@
 # Steam Community Analytics
 
+**[Live dashboard on Looker Studio](https://datastudio.google.com/reporting/46003bd3-41dd-4e78-bf56-366e13d88f4c)** · review volume, recommendation rate, and sentiment trends, filterable by game, built on this project's BigQuery dataset.
+
 A configurable, end-to-end pipeline for analyzing player sentiment, engagement,
 and community trends from Steam game reviews. Point it at any Steam appid:
 it ingests reviews, scores sentiment, trains a recommendation-prediction
@@ -16,8 +18,15 @@ recommended, "Overwhelmingly Positive") and **Marvel Rivals** (a genuinely
 contested title with a large negative-review base), about 65,000 reviews
 total.
 
-**Live dashboard:** [View the cloud-hosted report on Looker Studio](https://datastudio.google.com/reporting/46003bd3-41dd-4e78-bf56-366e13d88f4c),
-built on the project's BigQuery dataset. Includes review volume, recommendation rate, and sentiment trends, filterable by game.
+> **Snapshot note:** all specific figures in this README and in
+> [FINDINGS.md](FINDINGS.md) (review counts, ROC-AUC, base rates, feature
+> importances) reflect the dataset as of the runs documented there,
+> around 65,102 combined reviews. This project is designed to keep
+> growing potentially in the future: `update_data.py` retrains the model on the full corpus every
+> time it runs, so adding more games or fresh reviews will naturally
+> shift these numbers. That is expected and correct behavior, not a bug
+> or a documentation error. Run the pipeline (`python analysis/recommendation_model.py`) to see current numbers at
+> any time.
 
 ## What it does
 
@@ -189,44 +198,23 @@ build:
   Validated by confirming BigQuery results matched the original SQLite
   output exactly.
 
-## Case study: Palworld
+## Case studies: Palworld and Marvel Rivals
 
-The pipeline's first full run. Numbers from ~30,700 reviews spanning
-Feb 2025 to Jul 2026 (since topped up via `update_data.py`).
+Two deliberately contrasting games. Palworld is a paid survival game,
+"Overwhelmingly Positive," and was the pipeline's first full run.
+Marvel Rivals is free-to-play, "Mostly Positive," with a much larger
+negative-review base, added specifically to give the model and the
+dashboard a genuinely contested community to contrast against Palworld's
+near-uniform positivity. Adding it is also what surfaced the
+free-to-play ingestion bug documented above.
 
-**Recommendation model:**
-
-| Model | ROC-AUC |
-|---|---|
-| Logistic Regression (baseline) | 0.950 |
-| Random Forest | 0.968 |
-| Random Forest, `weighted_vote_score` removed (ablation) | 0.942 |
-
-Sentiment is the dominant feature by a wide margin. The base rate is ~94%
-recommended, so precision/recall on the minority (not-recommended) class
-matters more than the headline AUC.
-
-**Time-series finding:** the 5 highest-volume days all fall between July 10
-and 16, 2026, matching Palworld's full 1.0 release out of Early Access
-(about 850K concurrent players) and its follow-up hotfix. Not random noise.
-
-**SQL layer finding:** despite the massive volume spike, sentiment barely
-moved (94.6% to 94.1% recommended, pre/post-launch). The update drove
-attention, not a shift in opinion. Separately, reviews the sentiment model
-scores as *negative* are still marked "recommended" 64.6% of the time:
-players frequently vent real frustration in the text while still
-recommending the game, which is exactly why sentiment alone doesn't hit a
-perfect AUC on the recommendation label. Confirmed identically on both
-SQLite and BigQuery.
-
-## Second case study: Marvel Rivals
-
-Added as a contrasting dataset: a free-to-play, "Mostly
-Positive" (not "Overwhelmingly Positive") title with a much larger
-negative-review base than Palworld, and the source of the free-to-play
-ingestion bug documented above. With both games loaded, the recommendation
-model trains across two very differently-shaped communities, and the
-dashboard's game selector makes the contrast directly explorable.
+**For the full narrative and current specific numbers (model
+performance, the launch-spike time-series finding, the
+negative-sentiment-still-recommended pattern, and more), see
+[FINDINGS.md](FINDINGS.md).** Numbers aren't duplicated here on purpose:
+this project keeps growing (see the snapshot note above), and figures
+kept in one place are figures that can't drift out of sync with each
+other.
 
 ## Known data quirks worth knowing about
 
@@ -291,4 +279,4 @@ steam-analytics/
 - [x] Interactive Streamlit dashboard (dark theme, sample reviews, SQL explorer, model evaluation, backend toggle, game media)
 - [x] One-command incremental update pipeline
 - [x] Second case-study game (Marvel Rivals)
-- [x] Cloud-hosted dashboard (Looker Studio) 
+- [x] Cloud-hosted dashboard (Looker Studio, linked above)
