@@ -35,11 +35,27 @@ st.set_page_config(page_title="Steam Community Analytics", page_icon="🎮", lay
 # All read functions route through run_query() so the rest of the app doesn't care which backend is active.
 # ---------------------------------------------------------------------------
  
+def get_bigquery_client(bq_project: str | None):
+    from google.cloud import bigquery
+ 
+    try:
+        has_secret = "gcp_service_account" in st.secrets
+    except Exception:
+        has_secret = False 
+ 
+    if has_secret:
+        from google.oauth2 import service_account
+        credentials = service_account.Credentials.from_service_account_info(
+            dict(st.secrets["gcp_service_account"])
+        )
+        return bigquery.Client(project=bq_project or credentials.project_id, credentials=credentials)
+ 
+    return bigquery.Client(project=bq_project or None)
+ 
+ 
 def run_query(query: str, source: str, bq_project: str | None, params: tuple = ()) -> pd.DataFrame:
     if source == "BigQuery":
-        from google.cloud import bigquery
- 
-        client = bigquery.Client(project=bq_project or None)
+        client = get_bigquery_client(bq_project)
         job_config = bigquery.QueryJobConfig(
             default_dataset=f"{client.project}.steam_analytics",
         )
@@ -222,7 +238,12 @@ def main():
     # --- Sidebar: data source, refresh, game, pivot ---
     with st.sidebar:
         st.header("Data source")
-        source = st.radio("Backend", ["Local (SQLite)", "BigQuery"], index=0)
+        # Default to BigQuery when there's no local database to read from
+        # (e.g. a Streamlit Community Cloud deployment, which never has
+        # db/steam_analytics.db since it's gitignored). Locally, where the
+        # file exists, SQLite stays the default.
+        default_source_index = 0 if os.path.exists(DB_PATH) else 1
+        source = st.radio("Backend", ["Local (SQLite)", "BigQuery"], index=default_source_index)
         source = "BigQuery" if source == "BigQuery" else "SQLite"
         st.caption(
             "Both backends serve the same data (BigQuery is synced from the "
@@ -554,4 +575,3 @@ def main():
  
 if __name__ == "__main__":
     main()
- 
