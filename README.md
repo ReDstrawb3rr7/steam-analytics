@@ -16,6 +16,9 @@ recommended, "Overwhelmingly Positive") and **Marvel Rivals** (a genuinely
 contested title with a large negative-review base), about 65,000 reviews
 total.
 
+**Live dashboard:** [View the cloud-hosted report on Looker Studio](https://datastudio.google.com/reporting/46003bd3-41dd-4e78-bf56-366e13d88f4c),
+built on the project's BigQuery dataset. Includes review volume, recommendation rate, and sentiment trends, filterable by game.
+
 ## What it does
 
 - **Ingests reviews for any Steam game** via its public appid, no API key or
@@ -288,4 +291,4 @@ steam-analytics/
 - [x] Interactive Streamlit dashboard (dark theme, sample reviews, SQL explorer, model evaluation, backend toggle, game media)
 - [x] One-command incremental update pipeline
 - [x] Second case-study game (Marvel Rivals)
-- [ ] Cloud-hosted dashboard (Looker Studio) - in progress
+- [x] Cloud-hosted dashboard (Looker Studio) - in progress
