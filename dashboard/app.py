@@ -13,6 +13,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 import streamlit as st
+from google.cloud import bigquery
  
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "steam_analytics.db")
 OUTPUTS_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs")
