@@ -1,33 +1,25 @@
 """
-Interactive Streamlit dashboard for the Steam community analytics
-project. Supports two data sources: the local SQLite database (default)
-and BigQuery (opt-in via the sidebar).
-
 Usage:
-    pip install streamlit plotly
     streamlit run dashboard/app.py
-
-Theming: see .streamlit/config.toml for the black/red color scheme.
 """
 
 import json
 import os
 import re
 import sqlite3
-
 import joblib
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 import streamlit as st
-
+ 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "steam_analytics.db")
 OUTPUTS_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs")
 SQLITE_SQL_PATH = os.path.join(os.path.dirname(__file__), "..", "sql", "analytics_queries.sql")
-
+ 
 SENTIMENT_SIGN = {"positive": 1, "neutral": 0, "negative": -1}
-
+ 
 pio.templates.default = "plotly_dark"
 RED_PALETTE = ["#E63946", "#F1A208", "#6C757D", "#A4161A", "#D9BF77"]
 CHART_LAYOUT = dict(
@@ -35,20 +27,18 @@ CHART_LAYOUT = dict(
     paper_bgcolor="#0D0D0D",
     font_color="#F5F5F5",
 )
-
+ 
 st.set_page_config(page_title="Steam Community Analytics", page_icon="🎮", layout="wide")
-
-
+ 
 # ---------------------------------------------------------------------------
 # Data access layer: SQLite by default, BigQuery opt-in.
-# All read functions route through run_query() so the rest of the app
-# doesn't care which backend is active.
+# All read functions route through run_query() so the rest of the app doesn't care which backend is active.
 # ---------------------------------------------------------------------------
-
+ 
 def run_query(query: str, source: str, bq_project: str | None, params: tuple = ()) -> pd.DataFrame:
     if source == "BigQuery":
         from google.cloud import bigquery
-
+ 
         client = bigquery.Client(project=bq_project or None)
         job_config = bigquery.QueryJobConfig(
             default_dataset=f"{client.project}.steam_analytics",
@@ -69,21 +59,21 @@ def run_query(query: str, source: str, bq_project: str | None, params: tuple = (
         df = pd.read_sql_query(query, conn, params=params)
         conn.close()
         return df
-
-
+ 
+ 
 @st.cache_data
 def get_games(source: str, bq_project: str | None):
     return run_query("SELECT appid, name FROM games ORDER BY name", source, bq_project)
-
-
+ 
+ 
 @st.cache_data
 def get_review_counts(source: str, bq_project: str | None):
     return run_query(
         "SELECT appid, COUNT(*) AS review_count FROM reviews GROUP BY appid",
         source, bq_project,
     )
-
-
+ 
+ 
 @st.cache_data
 def load_reviews(appid: int, source: str, bq_project: str | None) -> pd.DataFrame:
     query = """
@@ -103,8 +93,8 @@ def load_reviews(appid: int, source: str, bq_project: str | None) -> pd.DataFram
     df["sentiment_signed"] = df["sentiment_label"].map(SENTIMENT_SIGN) * df["sentiment_score"]
     df["day"] = df["timestamp_created"].dt.date
     return df
-
-
+ 
+ 
 @st.cache_data
 def load_sample_reviews(appid: int, source: str, bq_project: str | None) -> pd.DataFrame:
     """Most-helpful positive and negative reviews, for the samples section."""
@@ -122,17 +112,17 @@ def load_sample_reviews(appid: int, source: str, bq_project: str | None) -> pd.D
     df = run_query(query, source, bq_project, params=(appid,))
     df["voted_up"] = df["voted_up"].astype(int)
     return df
-
-
+ 
+ 
 @st.cache_data(ttl=86400)
 def _fetch_game_media(appid: int) -> dict:
     """Fetch the current header image URL and official screenshot URLs
     from Steam's public appdetails endpoint, in one call.
-
+ 
     The header_image URL from appdetails is cache-busted (it embeds a
     content hash), unlike the bare CDN path .../apps/{appid}/header.jpg,
     which can serve stale art from years-old updates.
-
+ 
     Raises on failure rather than returning empty: st.cache_data would
     otherwise cache a transient failure as [] for the full TTL. The
     caller catches and degrades gracefully without caching the failure.
@@ -148,8 +138,8 @@ def _fetch_game_media(appid: int) -> dict:
         "header": data.get("header_image"),
         "screenshots": [s["path_thumbnail"] for s in data.get("screenshots", [])[:4]],
     }
-
-
+ 
+ 
 def load_game_media(appid: int) -> dict:
     """Wrapper that degrades to empty media on any failure, without the
     failure being cached."""
@@ -157,16 +147,16 @@ def load_game_media(appid: int) -> dict:
         return _fetch_game_media(appid)
     except Exception:
         return {"header": None, "screenshots": []}
-
-
+ 
+ 
 def load_model_eval(suffix: str = ""):
     path = os.path.join(OUTPUTS_DIR, f"recommendation_model{suffix}_eval.json")
     if not os.path.exists(path):
         return None
     with open(path) as f:
         return json.load(f)
-
-
+ 
+ 
 def load_model_importances(suffix: str = ""):
     filename = f"recommendation_model{suffix}.joblib"
     path = os.path.join(OUTPUTS_DIR, filename)
@@ -177,8 +167,8 @@ def load_model_importances(suffix: str = ""):
         bundle["model"].feature_importances_, index=bundle["features"]
     ).sort_values(ascending=False)
     return importances
-
-
+ 
+ 
 def load_sql_query_blocks():
     """Parse the SQLite analytics queries file into (title, sql) pairs for
     the SQL explorer. Same parsing approach as analysis/sql_report.py,
@@ -218,17 +208,17 @@ def load_sql_query_blocks():
         header = re.sub(r"=+", "", header).strip()[:80] or "(untitled)"
         blocks.append((header, raw.rstrip(";").strip()))
     return blocks
-
-
+ 
+ 
 def style_fig(fig):
     fig.update_layout(**CHART_LAYOUT)
     return fig
-
-
+ 
+ 
 def main():
     st.title("🎮 Steam Community Analytics")
     st.caption("Player sentiment, engagement, and recommendation trends from Steam reviews.")
-
+ 
     # --- Sidebar: data source, refresh, game, pivot ---
     with st.sidebar:
         st.header("Data source")
@@ -248,15 +238,15 @@ def main():
                 "run on this machine, and the dataset migrated via "
                 "`migration/migrate_to_bigquery.py`."
             )
-
+ 
         if st.button("🔄 Refresh data", help="Clears cached query results and re-reads from the database"):
             st.cache_data.clear()
             st.rerun()
-
+ 
         st.divider()
         st.header("Filters")
-
-    # Everything below can fail if BigQuery isn't set up; fail visibly, not cryptically
+ 
+    # Everything below can fail if BigQuery isn't set up properly!! fail visibly, not cryptically
     try:
         games = get_games(source, bq_project)
     except Exception as e:
@@ -269,18 +259,18 @@ def main():
                "Check that `db/steam_analytics.db` exists (run the ingestion pipeline first).")
         )
         return
-
+ 
     if games.empty:
         st.warning(
             "No games in the database yet. Ingest one first, for example:\n\n"
             "```\npython ingestion/steam_ingest.py --appid 1623730 --max-reviews 30000\n```"
         )
         return
-
+ 
     review_counts = get_review_counts(source, bq_project)
     games = games.merge(review_counts, on="appid", how="left")
     games["review_count"] = games["review_count"].fillna(0).astype(int)
-
+ 
     with st.sidebar:
         game_options = [
             f"{row['name']} ({row['appid']}) - {row['review_count']:,} reviews"
@@ -299,7 +289,7 @@ def main():
         st.session_state.selected_appid = appid
         game_name = game_label.split(" (")[0]
         pivot_date = st.date_input("Pivot date (optional, e.g. a patch date)", value=None, key="pivot_select")
-
+ 
     df = load_reviews(appid, source, bq_project)
     if df.empty:
         st.warning(
@@ -311,10 +301,10 @@ def main():
             f"python analysis/sentiment.py\n```"
         )
         return
-
+ 
     # --- Overview ---
     st.subheader("📊 Overview")
-
+ 
     media = load_game_media(appid)
     # Prefer the cache-busted header from appdetails (always current art);
     # fall back to the bare CDN path, which works but can serve stale art.
@@ -322,35 +312,35 @@ def main():
     header_col, text_col = st.columns([1, 2])
     with header_col:
         st.image(header_url, use_container_width=True)
-
+ 
     avg_sent = df["sentiment_signed"].mean()
     sentiment_word = "positive" if avg_sent > 0.15 else ("negative" if avg_sent < -0.15 else "mixed")
     recommend_pct = df["voted_up"].mean()
     start_date = df["timestamp_created"].min().date()
     end_date = df["timestamp_created"].max().date()
-
+ 
     with text_col:
         st.markdown(
             f"**{game_name}** has **{len(df):,} reviews** collected from **{start_date}** to **{end_date}**. "
             f"**{recommend_pct:.0%}** of reviewers recommend it, and overall review sentiment reads as **{sentiment_word}**. "
             f"Data source: **{source}**."
         )
-
+ 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total reviews", f"{len(df):,}")
     col2.metric("Recommended", f"{recommend_pct:.1%}")
     col3.metric("Avg. sentiment", f"{avg_sent:+.2f}")
     col4.metric("Date range", f"{start_date} → {end_date}")
-
+ 
     screenshots = media["screenshots"]
     if screenshots:
         with st.expander("📷 Game screenshots (from Steam)"):
             shot_cols = st.columns(len(screenshots))
             for c, url in zip(shot_cols, screenshots):
                 c.image(url, use_container_width=True)
-
+ 
     st.divider()
-
+ 
     # --- Daily activity ---
     st.subheader("Daily activity")
     daily = df.groupby("day").agg(
@@ -360,7 +350,7 @@ def main():
     ).reset_index()
     daily["day"] = pd.to_datetime(daily["day"])
     daily["rolling_7d_volume"] = daily["review_count"].rolling(7, min_periods=1).mean()
-
+ 
     tab1, tab2 = st.tabs(["Volume", "Sentiment"])
     with tab1:
         fig = px.line(daily, x="day", y=["review_count", "rolling_7d_volume"],
@@ -381,7 +371,7 @@ def main():
             fig.add_vline(x=pd.Timestamp(pivot_date), line_dash="dash", line_color="#F1A208",
                            annotation_text="Pivot date")
         st.plotly_chart(style_fig(fig), use_container_width=True)
-
+ 
     if pivot_date:
         st.subheader(f"Before vs. after {pivot_date}")
         df["period"] = df["timestamp_created"].dt.date.apply(
@@ -395,16 +385,16 @@ def main():
         summary["recommend_pct"] = (summary["recommend_pct"] * 100).round(1)
         summary["avg_sentiment"] = summary["avg_sentiment"].round(3)
         st.dataframe(summary, use_container_width=True)
-
+ 
     st.divider()
-
+ 
     # --- Sample reviews ---
     st.subheader("🗣️ What players are actually saying")
     st.caption("The most-helpful (most upvoted) reviews on each side.")
     samples = load_sample_reviews(appid, source, bq_project)
     pos_samples = samples[samples["voted_up"] == 1].head(3)
     neg_samples = samples[samples["voted_up"] == 0].head(3)
-
+ 
     scol1, scol2 = st.columns(2)
     with scol1:
         st.markdown("**👍 Recommended**")
@@ -418,9 +408,9 @@ def main():
             hours = row["playtime_at_review"] / 60
             with st.expander(f"{row['votes_up']:,} helpful votes · {hours:,.0f} hrs played"):
                 st.write(row["review_text"][:1500] + ("..." if len(row["review_text"]) > 1500 else ""))
-
+ 
     st.divider()
-
+ 
     # --- Playtime vs recommendation ---
     st.subheader("Recommendation rate by playtime")
     bins = [0, 600, 3000, 12000, float("inf")]
@@ -436,7 +426,7 @@ def main():
                  title="Does playtime predict recommendation?",
                  color_discrete_sequence=RED_PALETTE)
     st.plotly_chart(style_fig(fig), use_container_width=True)
-
+ 
     # --- Sentiment vs recommendation ---
     st.subheader("Sentiment vs. actual recommendation")
     st.caption("Where does review text tone disagree with the explicit thumbs-up/down?")
@@ -446,9 +436,9 @@ def main():
                  title="Recommendation outcome by sentiment label",
                  color_discrete_sequence=RED_PALETTE)
     st.plotly_chart(style_fig(fig), use_container_width=True)
-
+ 
     st.divider()
-
+ 
     # --- Model evaluation ---
     st.subheader("🤖 Recommendation model evaluation")
     eval_data = load_model_eval()
@@ -459,11 +449,25 @@ def main():
             "```\npython analysis/recommendation_model.py\n```"
         )
     else:
-        mcol1, mcol2, mcol3 = st.columns(3)
+        mcol1, mcol2, mcol3, mcol4 = st.columns(4)
         mcol1.metric("Random Forest ROC-AUC", f"{eval_data['random_forest']['roc_auc']:.3f}")
         mcol2.metric("Logistic Regression ROC-AUC", f"{eval_data['logreg']['roc_auc']:.3f}")
-        mcol3.metric("Base rate (recommended)", f"{eval_data['base_rate']:.1%}")
-
+        if "xgboost" in eval_data:
+            mcol3.metric("XGBoost ROC-AUC", f"{eval_data['xgboost']['roc_auc']:.3f}")
+        mcol4.metric("Base rate (recommended)", f"{eval_data['base_rate']:.1%}")
+ 
+        if "temporal_split" in eval_data:
+            temporal_bits = ", ".join(
+                f"{name.replace('_', ' ')} {res['roc_auc']:.3f}"
+                for name, res in eval_data["temporal_split"].items()
+            )
+            st.caption(
+                f"Temporal validation (train on earlier reviews, test on the most "
+                f"recent 25%): {temporal_bits}. This answers the stricter question "
+                f"of whether the model generalizes forward in time, not just "
+                f"across a shuffled sample."
+            )
+ 
         ablation = load_model_eval("_minus_weighted_vote_score")
         if ablation:
             st.caption(
@@ -471,7 +475,7 @@ def main():
                 f"**{ablation['random_forest']['roc_auc']:.3f}**, confirming sentiment "
                 f"carries most of the signal."
             )
-
+ 
         ecol1, ecol2 = st.columns(2)
         with ecol1:
             cm = eval_data["random_forest"]["confusion_matrix"]
@@ -493,7 +497,7 @@ def main():
             fig.update_layout(title="ROC curve (Random Forest, test set)",
                               xaxis_title="False positive rate", yaxis_title="True positive rate")
             st.plotly_chart(style_fig(fig), use_container_width=True)
-
+ 
         importances = load_model_importances()
         if importances is not None:
             fig = px.bar(importances.head(10)[::-1], orientation="h",
@@ -501,9 +505,9 @@ def main():
                          title="Top 10 features (Random Forest)",
                          color_discrete_sequence=RED_PALETTE)
             st.plotly_chart(style_fig(fig), use_container_width=True)
-
+ 
     st.divider()
-
+ 
     # --- SQL explorer ---
     st.subheader("🔎 SQL explorer")
     st.caption(
@@ -533,7 +537,7 @@ def main():
                 else:
                     st.warning("This query needs a pivot date. Set one in the sidebar.")
                     rendered = None
-
+ 
             if rendered:
                 with st.expander("View SQL"):
                     st.code(rendered, language="sql")
@@ -546,7 +550,8 @@ def main():
                         st.caption(f"{len(result):,} rows returned.")
                     except Exception as e:
                         st.error(f"Query failed: {e}")
-
-
+ 
+ 
 if __name__ == "__main__":
     main()
+ 

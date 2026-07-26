@@ -487,5 +487,19 @@
     "day_of_week": 0.0017377345040619982,
     "received_for_free": 0.00026203254908322213,
     "steam_purchase": 0.0
+  },
+  "xgboost": {
+    "roc_auc": 0.9487775744525095
+  },
+  "temporal_split": {
+    "logistic_regression": {
+      "roc_auc": 0.9095110608689054
+    },
+    "random_forest": {
+      "roc_auc": 0.9382280215434791
+    },
+    "xgboost": {
+      "roc_auc": 0.9410025766797828
+    }
   }
 }
