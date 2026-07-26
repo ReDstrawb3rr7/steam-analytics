@@ -167,6 +167,34 @@ def load_game_media(appid: int) -> dict:
         return {"header": None, "screenshots": []}
 
 
+@st.cache_data
+def load_fun_stats(appid: int, source: str, bq_project: str | None) -> dict:
+    longest = run_query(
+        "SELECT review_text, review_length FROM reviews "
+        "WHERE appid = ? AND review_text IS NOT NULL "
+        "ORDER BY review_length DESC LIMIT 1",
+        source, bq_project, params=(appid,),
+    )
+    most_helpful = run_query(
+        "SELECT review_text, votes_up, voted_up FROM reviews "
+        "WHERE appid = ? ORDER BY votes_up DESC LIMIT 1",
+        source, bq_project, params=(appid,),
+    )
+    top_reviewer = run_query(
+        "SELECT steamid, COUNT(*) AS review_count FROM reviews "
+        "WHERE appid = ? GROUP BY steamid ORDER BY review_count DESC LIMIT 1",
+        source, bq_project, params=(appid,),
+    )
+    if not most_helpful.empty:
+        most_helpful["voted_up"] = most_helpful["voted_up"].astype(int)
+
+    return {
+        "longest": longest.iloc[0].to_dict() if not longest.empty else None,
+        "most_helpful": most_helpful.iloc[0].to_dict() if not most_helpful.empty else None,
+        "top_reviewer": top_reviewer.iloc[0].to_dict() if not top_reviewer.empty else None,
+    }
+
+
 def load_model_eval(suffix: str = ""):
     path = os.path.join(OUTPUTS_DIR, f"recommendation_model{suffix}_eval.json")
     if not os.path.exists(path):
@@ -304,6 +332,39 @@ def main():
         game_name = games.loc[games["appid"] == appid, "name"].iloc[0]
         pivot_date = st.date_input("Pivot date (optional, e.g. a patch date)", value=None, key="pivot_select")
 
+    if len(games) >= 2:
+        st.subheader("🆚 Compare games")
+        compare_appids = st.multiselect(
+            "Pick games to compare",
+            options=games["appid"].tolist(),
+            default=games["appid"].tolist()[:2],
+            format_func=lambda a: games.loc[games["appid"] == a, "name"].iloc[0],
+        )
+        if len(compare_appids) >= 2:
+            compare_rows = []
+            for cid in compare_appids:
+                cdf = load_reviews(cid, source, bq_project)
+                if cdf.empty:
+                    continue
+                compare_rows.append({
+                    "Game": games.loc[games["appid"] == cid, "name"].iloc[0],
+                    "Reviews": len(cdf),
+                    "Recommend %": round(cdf["voted_up"].mean() * 100, 1),
+                    "Avg. sentiment": round(cdf["sentiment_signed"].mean(), 3),
+                })
+            if compare_rows:
+                compare_df = pd.DataFrame(compare_rows)
+                ccol1, ccol2 = st.columns([1, 1])
+                with ccol1:
+                    st.dataframe(compare_df, use_container_width=True, hide_index=True)
+                with ccol2:
+                    fig = px.bar(compare_df, x="Game", y="Recommend %", text_auto=".1f",
+                                 title="Recommend % by game", color_discrete_sequence=RED_PALETTE)
+                    st.plotly_chart(style_fig(fig), use_container_width=True)
+        else:
+            st.caption("Pick at least 2 games to compare.")
+        st.divider()
+
     df = load_reviews(appid, source, bq_project)
     if df.empty:
         st.warning(
@@ -431,6 +492,48 @@ def main():
             hours = row["playtime_at_review"] / 60
             with st.expander(f"{row['votes_up']:,} helpful votes · {hours:,.0f} hrs played"):
                 st.write(row["review_text"][:1500] + ("..." if len(row["review_text"]) > 1500 else ""))
+
+    st.divider()
+
+    st.subheader("🏆 Fun stats")
+    fun_stats = load_fun_stats(appid, source, bq_project)
+    fcol1, fcol2, fcol3 = st.columns(3)
+
+    with fcol1:
+        with st.container(border=True):
+            st.markdown("**📏 Longest review**")
+            longest = fun_stats["longest"]
+            if longest:
+                st.metric("Length", f"{int(longest['review_length']):,} chars")
+                with st.expander("Read it"):
+                    st.write(longest["review_text"][:2000] +
+                             ("..." if len(longest["review_text"]) > 2000 else ""))
+            else:
+                st.caption("No data.")
+
+    with fcol2:
+        with st.container(border=True):
+            st.markdown("**⭐ Most helpful review ever**")
+            most_helpful = fun_stats["most_helpful"]
+            if most_helpful:
+                verdict = "👍 Recommended" if most_helpful["voted_up"] else "👎 Not recommended"
+                st.metric("Helpful votes", f"{int(most_helpful['votes_up']):,}")
+                st.caption(verdict)
+                with st.expander("Read it"):
+                    st.write(most_helpful["review_text"][:2000] +
+                             ("..." if len(most_helpful["review_text"]) > 2000 else ""))
+            else:
+                st.caption("No data.")
+
+    with fcol3:
+        with st.container(border=True):
+            st.markdown("**✍️ Most prolific reviewer**")
+            top_reviewer = fun_stats["top_reviewer"]
+            if top_reviewer:
+                st.metric("Reviews written", f"{int(top_reviewer['review_count']):,}")
+                st.caption(f"Steam ID: `{top_reviewer['steamid']}`")
+            else:
+                st.caption("No data.")
 
     st.divider()
 
