@@ -18,6 +18,7 @@ from google.cloud import bigquery
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "steam_analytics.db")
 OUTPUTS_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs")
 SQLITE_SQL_PATH = os.path.join(os.path.dirname(__file__), "..", "sql", "analytics_queries.sql")
+BIGQUERY_SQL_PATH = os.path.join(os.path.dirname(__file__), "..", "sql", "bigquery_analytics_queries.sql")
 
 SENTIMENT_SIGN = {"positive": 1, "neutral": 0, "negative": -1}
 
@@ -31,6 +32,10 @@ CHART_LAYOUT = dict(
 
 st.set_page_config(page_title="Steam Community Analytics", page_icon="🎮", layout="wide")
 
+# Card styling for metrics and bordered containers: a subtle background,
+# rounded corners, and a red accent border matching the dashboard's
+# color palette, so KPI numbers read as distinct cards rather than bare
+# text sitting on the page background.
 st.markdown("""
 <style>
 [data-testid="stMetric"] {
@@ -182,10 +187,16 @@ def load_model_importances(suffix: str = ""):
     return importances
 
 
-def load_sql_query_blocks():
-    if not os.path.exists(SQLITE_SQL_PATH):
+def load_sql_query_blocks(path: str = SQLITE_SQL_PATH):
+    """Parse a .sql file into (title, sql) pairs for the SQL explorer.
+    Same parsing approach as analysis/sql_report.py, plus: strips
+    decorative banner lines (=====) that would otherwise pollute the
+    first query's title if the file header sits adjacent to it. Works
+    for either dialect's file since both use the same comment/query
+    layout."""
+    if not os.path.exists(path):
         return []
-    text = open(SQLITE_SQL_PATH, encoding="utf-8").read()
+    text = open(path, encoding="utf-8").read()
     raw_chunks = re.split(r"\n\s*\n", text)
     blocks = []
     for raw in raw_chunks:
@@ -221,7 +232,7 @@ def style_fig(fig):
 
 
 def main():
-    st.title("Steam Community Analytics")
+    st.title("🎮 Steam Community Analytics")
     st.caption("Player sentiment, engagement, and recommendation trends from Steam reviews.")
 
     with st.sidebar:
@@ -520,24 +531,49 @@ def main():
 
     st.subheader("🔎 SQL explorer")
     st.caption(
-        "Run the project's analytics queries directly. Queries run against the "
-        "local SQLite database (the BigQuery versions live in "
-        "`sql/bigquery_analytics_queries.sql` and use a different dialect)."
+        "Run the project's analytics queries directly against whichever "
+        "backend is selected above."
     )
+
     if source == "BigQuery":
-        st.info(
-            "The SQL explorer currently runs against the local SQLite database "
-            "only, since the two backends use different SQL dialects. Switch the "
-            "backend to Local (SQLite) to use it, or run the BigQuery versions "
-            "via `python analysis/bigquery_sql_report.py`."
-        )
+        blocks = load_sql_query_blocks(BIGQUERY_SQL_PATH)
+        if not blocks:
+            st.info("Could not find `sql/bigquery_analytics_queries.sql`.")
+        else:
+            titles = [title for title, _ in blocks]
+            chosen = st.selectbox("Pick a query", titles, key="bq_sql_choice")
+            chosen_sql = dict(blocks)[chosen]
+            needs_pivot = "@pivot_date" in chosen_sql
+
+            if needs_pivot and not pivot_date:
+                st.warning("This query needs a pivot date. Set one in the sidebar.")
+            else:
+                with st.expander("View SQL"):
+                    st.code(chosen_sql, language="sql")
+                if st.button("▶ Run query", key="bq_sql_run"):
+                    try:
+                        client = get_bigquery_client(bq_project)
+                        query_params = [bigquery.ScalarQueryParameter("appid", "INT64", appid)]
+                        if needs_pivot:
+                            query_params.append(
+                                bigquery.ScalarQueryParameter("pivot_date", "DATE", pivot_date)
+                            )
+                        job_config = bigquery.QueryJobConfig(
+                            default_dataset=f"{client.project}.steam_analytics",
+                            query_parameters=query_params,
+                        )
+                        result = client.query(chosen_sql, job_config=job_config).to_dataframe()
+                        st.dataframe(result, use_container_width=True)
+                        st.caption(f"{len(result):,} rows returned.")
+                    except Exception as e:
+                        st.error(f"Query failed: {e}")
     else:
-        blocks = load_sql_query_blocks()
+        blocks = load_sql_query_blocks(SQLITE_SQL_PATH)
         if not blocks:
             st.info("Could not find `sql/analytics_queries.sql`.")
         else:
             titles = [title for title, _ in blocks]
-            chosen = st.selectbox("Pick a query", titles)
+            chosen = st.selectbox("Pick a query", titles, key="sqlite_sql_choice")
             chosen_sql = dict(blocks)[chosen]
             rendered = chosen_sql.replace("{{APPID}}", str(appid))
             if "{{PIVOT_DATE}}" in rendered:
@@ -550,7 +586,7 @@ def main():
             if rendered:
                 with st.expander("View SQL"):
                     st.code(rendered, language="sql")
-                if st.button("▶ Run query"):
+                if st.button("▶ Run query", key="sqlite_sql_run"):
                     try:
                         conn = sqlite3.connect(DB_PATH)
                         result = pd.read_sql_query(rendered, conn)
