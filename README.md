@@ -1,6 +1,6 @@
 # Steam Community Analytics
 
-**[Live dashboard on Looker Studio](https://datastudio.google.com/reporting/46003bd3-41dd-4e78-bf56-366e13d88f4c)** · review volume, recommendation rate, and sentiment trends, filterable by game, built on this project's BigQuery dataset.
+**[Live dashboard on Looker Studio](https://datastudio.google.com/reporting/46003bd3-41dd-4e78-bf56-366e13d88f4c)** · **[Interactive dashboard on Streamlit](https://redstrawb3rr7-steam-analytics-dashboardapp-g93bs7.streamlit.app/)** · review volume, recommendation rate, and sentiment trends, filterable by game, built on this project's BigQuery dataset.
 
 A configurable, end-to-end pipeline for analyzing player sentiment, engagement,
 and community trends from Steam game reviews. Point it at any Steam appid:

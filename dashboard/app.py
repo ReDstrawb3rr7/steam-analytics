@@ -42,7 +42,7 @@ def get_bigquery_client(bq_project: str | None):
     try:
         has_secret = "gcp_service_account" in st.secrets
     except Exception:
-        has_secret = False 
+        has_secret = False  
  
     if has_secret:
         from google.oauth2 import service_account
@@ -294,22 +294,21 @@ def main():
     games["review_count"] = games["review_count"].fillna(0).astype(int)
  
     with st.sidebar:
-        game_options = [
-            f"{row['name']} ({row['appid']}) - {row['review_count']:,} reviews"
-            for _, row in games.iterrows()
-        ]
-        # Track the chosen appid (not the label string) across reruns: the
-        # label embeds the review count, so after a data refresh the label
-        # text changes and a string-keyed selectbox would fall back to the
-        # first option. Restoring by appid keeps the same game selected.
         appids_in_order = games["appid"].tolist()
-        default_index = 0
-        if "selected_appid" in st.session_state and st.session_state.selected_appid in appids_in_order:
-            default_index = appids_in_order.index(st.session_state.selected_appid)
-        game_label = st.selectbox("Game", game_options, index=default_index)
-        appid = int(game_label.split("(")[1].split(")")[0])
-        st.session_state.selected_appid = appid
-        game_name = game_label.split(" (")[0]
+        if "selected_appid" in st.session_state and st.session_state.selected_appid not in appids_in_order:
+            del st.session_state["selected_appid"]
+ 
+        labels_by_appid = {
+            row["appid"]: f"{row['name']} ({row['appid']}) - {row['review_count']:,} reviews"
+            for _, row in games.iterrows()
+        }
+        appid = st.selectbox(
+            "Game",
+            options=appids_in_order,
+            format_func=lambda a: labels_by_appid[a],
+            key="selected_appid",
+        )
+        game_name = games.loc[games["appid"] == appid, "name"].iloc[0]
         pivot_date = st.date_input("Pivot date (optional, e.g. a patch date)", value=None, key="pivot_select")
  
     df = load_reviews(appid, source, bq_project)
@@ -356,7 +355,7 @@ def main():
  
     screenshots = media["screenshots"]
     if screenshots:
-        with st.expander("📷 Game screenshots (from Steam)"):
+        with st.expander("📷 Game screenshots (from Steam)", expanded=True):
             shot_cols = st.columns(len(screenshots))
             for c, url in zip(shot_cols, screenshots):
                 c.image(url, use_container_width=True)
