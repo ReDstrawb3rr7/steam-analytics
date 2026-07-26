@@ -1,6 +1,26 @@
+"""
+Steam reviews ingestion script.
+
+Pulls reviews for a given Steam appid via the public, unauthenticated
+appreviews endpoint and stores them in SQLite. No API key or account
+required.
+
+Usage:
+    python ingestion/steam_ingest.py --appid 1623730 --max-reviews 5000
+    python ingestion/steam_ingest.py --appid 1623730 --max-reviews 5000 --filter updated
+
+Notes:
+    - filter=recent : reviews ordered by creation date, newest first (default;
+      best for time-series work since you get a continuous recent window)
+    - filter=updated: ordered by last update date
+    - filter=all     : Steam's relevance-ranked ordering (NOT chronological — avoid this if you care about time-series analysis)
+    - Reviews come back in pages of up to 100. This script pages through using the cursor until it hits --max-reviews or runs out of reviews.
+"""
+
 import argparse
 import os
 import sqlite3
+import sys
 import time
 from datetime import datetime, timezone
 import requests
@@ -8,8 +28,8 @@ import requests
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "steam_analytics.db")
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "schema.sql")
 
-steam_reviews_url = "https://store.steampowered.com/appreviews/{appid}"
-steam_app_url = "https://store.steampowered.com/api/appdetails"
+REVIEWS_URL = "https://store.steampowered.com/appreviews/{appid}"
+APPDETAILS_URL = "https://store.steampowered.com/api/appdetails"
 
 PAGE_SIZE = 100
 SLEEP_SECONDS = 1.0
@@ -28,8 +48,9 @@ def to_iso(ts: int) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 def fetch_game_name(appid: int) -> str:
+    """Best-effort fetch of the game's display name. Non-fatal if it fails."""
     try:
-        resp = requests.get(steam_app_url, params={"appids": appid}, timeout=10)
+        resp = requests.get(APPDETAILS_URL, params={"appids": appid}, timeout=10)
         data = resp.json()
         return data[str(appid)]["data"]["name"]
     except Exception:
@@ -90,21 +111,27 @@ def insert_review(conn, appid: int, review: dict):
 def ingest(appid: int, max_reviews: int, review_filter: str, language: str):
     init_db()
     conn = get_conn()
- 
+
     game_name = fetch_game_name(appid)
     upsert_game(conn, appid, game_name)
     print(f"Ingesting reviews for {game_name} (appid {appid})...")
- 
+
     cursor = "*"
     total_pulled = 0
     earliest, latest = None, None
- 
+
     session = requests.Session()
     session.headers.update({"User-Agent": "Mozilla/5.0"})
+    # Some titles carry mature-content descriptors (sometimes accurate,
+    # sometimes just tag-vandalism from other users) that make Steam's
+    # API silently return zero reviews instead of an error unless an
+    # age-verification cookie is present. Setting a safely-adult
+    # birthtime avoids that entirely; it doesn't grant any access beyond
+    # what a normal signed-out visitor confirming their age would get.
     session.cookies.set("wants_mature_content", "1", domain="store.steampowered.com")
     session.cookies.set("birthtime", "631152000", domain="store.steampowered.com")  # 1990-01-01
     session.cookies.set("lastagecheckage", "1-January-1990", domain="store.steampowered.com")
- 
+
     while total_pulled < max_reviews:
         params = {
             "json": 1,
@@ -112,43 +139,60 @@ def ingest(appid: int, max_reviews: int, review_filter: str, language: str):
             "language": language,
             "num_per_page": min(PAGE_SIZE, max_reviews - total_pulled),
             "cursor": cursor,
+            # Steam defaults purchase_type to "steam" (purchased on Steam),
+            # which silently excludes essentially all reviewers of
+            # free-to-play titles (nobody "purchased" a F2P game), returning
+            # zero reviews for games like Marvel Rivals. Always request all.
+            "purchase_type": "all",
         }
-        resp = session.get(steam_reviews_url.format(appid=appid), params=params, timeout=15)
+        resp = session.get(REVIEWS_URL.format(appid=appid), params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
- 
+
         if data.get("success") != 1:
             print("Steam API returned an error response, stopping.")
             break
- 
+
         reviews = data.get("reviews", [])
         if not reviews:
             print("No more reviews returned, stopping.")
             break
- 
+
         for review in reviews:
             upsert_reviewer(conn, review["author"])
             insert_review(conn, appid, review)
- 
+
             created = to_iso(review["timestamp_created"])
             earliest = created if earliest is None or created < earliest else earliest
             latest = created if latest is None or created > latest else latest
- 
+
         conn.commit()
         total_pulled += len(reviews)
         print(f"  Pulled {total_pulled} reviews so far...")
- 
+
         next_cursor = data.get("cursor")
         if not next_cursor or next_cursor == cursor:
             print("Cursor stopped advancing, reached end of available reviews.")
             break
         cursor = next_cursor
- 
+
         time.sleep(SLEEP_SECONDS)
- 
+
     print(f"\nDone. Ingested {total_pulled} reviews for {game_name}.")
     print(f"Date range: {earliest} -> {latest}")
     conn.close()
+
+    if total_pulled == 0:
+        print(
+            "\nWARNING: zero reviews were ingested. This usually means one of:\n"
+            "  - The date-ordered filters are broken for this title "
+            "(retry with --filter all)\n"
+            "  - The appid is wrong, or the game genuinely has no reviews\n"
+            "Exiting nonzero so a chained pipeline (e.g. update_data.py) stops "
+            "here instead of running downstream steps on no data."
+        )
+        sys.exit(1)
+
 
 def main():
     parser = argparse.ArgumentParser()

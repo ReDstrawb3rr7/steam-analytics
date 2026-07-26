@@ -8,10 +8,15 @@ Usage:
 import argparse
 import os
 import sqlite3
+import time
 import pandas as pd
 from google.cloud import bigquery
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "db", "steam_analytics.db")
+
+CHUNK_ROWS = 20000
+MAX_RETRIES = 3
+RETRY_WAIT_SECONDS = 5
 
 TABLE_SCHEMAS = {
     "games": [
@@ -92,7 +97,7 @@ def ensure_dataset(client: bigquery.Client, dataset_id: str, location: str):
         client.create_dataset(dataset)
         print(f"Created dataset '{dataset_id}' in {location}.")
     return dataset_ref
- 
+
  
 def main():
     parser = argparse.ArgumentParser()
@@ -117,13 +122,33 @@ def main():
             continue
  
         table_ref = dataset_ref.table(table_name)
-        job_config = bigquery.LoadJobConfig(
-            schema=TABLE_SCHEMAS[table_name],
-            write_disposition="WRITE_TRUNCATE",
-        )
-        job = client.load_table_from_dataframe(df, table_ref, job_config=job_config)
-        job.result()  # blocks until the load finishes
-        print(f"  Loaded {job.output_rows} rows into {args.dataset}.{table_name}")
+        total_loaded = 0
+        for start in range(0, len(df), CHUNK_ROWS):
+            chunk = df.iloc[start : start + CHUNK_ROWS]
+            # First chunk replaces the table; the rest append to it
+            disposition = "WRITE_TRUNCATE" if start == 0 else "WRITE_APPEND"
+            job_config = bigquery.LoadJobConfig(
+                schema=TABLE_SCHEMAS[table_name],
+                write_disposition=disposition,
+            )
+ 
+            for attempt in range(1, MAX_RETRIES + 1):
+                try:
+                    job = client.load_table_from_dataframe(chunk, table_ref, job_config=job_config)
+                    job.result()
+                    total_loaded += job.output_rows
+                    print(f"  Loaded chunk {start // CHUNK_ROWS + 1} "
+                          f"({total_loaded}/{len(df)} rows)")
+                    break
+                except Exception as e:
+                    if attempt == MAX_RETRIES:
+                        print(f"  Chunk failed after {MAX_RETRIES} attempts: {e}")
+                        raise
+                    print(f"  Chunk attempt {attempt} failed ({type(e).__name__}), "
+                          f"retrying in {RETRY_WAIT_SECONDS}s...")
+                    time.sleep(RETRY_WAIT_SECONDS)
+ 
+        print(f"  Done: {total_loaded} rows into {args.dataset}.{table_name}")
  
     sqlite_conn.close()
     print("\nMigration complete.")
