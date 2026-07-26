@@ -42,7 +42,7 @@ def get_bigquery_client(bq_project: str | None):
     try:
         has_secret = "gcp_service_account" in st.secrets
     except Exception:
-        has_secret = False  
+        has_secret = False  # no secrets.toml at all, e.g. plain local dev
  
     if has_secret:
         from google.oauth2 import service_account
@@ -347,11 +347,11 @@ def main():
             f"Data source: **{source}**."
         )
  
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     col1.metric("Total reviews", f"{len(df):,}")
     col2.metric("Recommended", f"{recommend_pct:.1%}")
     col3.metric("Avg. sentiment", f"{avg_sent:+.2f}")
-    col4.metric("Date range", f"{start_date} → {end_date}")
+    st.caption(f"Date range: {start_date} → {end_date}")
  
     screenshots = media["screenshots"]
     if screenshots:
