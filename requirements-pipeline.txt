@@ -1,0 +1,13 @@
+# Additional dependencies needed to run the full local pipeline
+# (ingestion, sentiment scoring, model training, time-series analysis,
+# BigQuery migration) beyond what the dashboard alone needs.
+#
+# This pulls in requirements.txt too, so one command installs everything
+# needed for full local development:
+#   pip install -r requirements-pipeline.txt
+-r requirements.txt
+transformers>=4.35
+torch>=2.0
+statsmodels>=0.14
+matplotlib>=3.7
+xgboost>=2.0
