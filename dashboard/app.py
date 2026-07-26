@@ -175,23 +175,35 @@ def load_fun_stats(appid: int, source: str, bq_project: str | None) -> dict:
         "ORDER BY review_length DESC LIMIT 1",
         source, bq_project, params=(appid,),
     )
-    most_helpful = run_query(
-        "SELECT review_text, votes_up, voted_up FROM reviews "
-        "WHERE appid = ? ORDER BY votes_up DESC LIMIT 1",
+    funniest = run_query(
+        "SELECT review_text, votes_funny, voted_up FROM reviews "
+        "WHERE appid = ? AND review_text IS NOT NULL "
+        "ORDER BY votes_funny DESC LIMIT 1",
         source, bq_project, params=(appid,),
     )
-    top_reviewer = run_query(
-        "SELECT steamid, COUNT(*) AS review_count FROM reviews "
-        "WHERE appid = ? GROUP BY steamid ORDER BY review_count DESC LIMIT 1",
+    most_dedicated = run_query(
+        "SELECT review_text, playtime_at_review, voted_up FROM reviews "
+        "WHERE appid = ? AND review_text IS NOT NULL "
+        "ORDER BY playtime_at_review DESC LIMIT 1",
         source, bq_project, params=(appid,),
     )
-    if not most_helpful.empty:
-        most_helpful["voted_up"] = most_helpful["voted_up"].astype(int)
+    most_complicated = run_query(
+        "SELECT r.review_text, r.votes_up FROM reviews r "
+        "JOIN review_scores s ON r.recommendation_id = s.recommendation_id "
+        "WHERE r.appid = ? AND s.sentiment_label = 'negative' AND r.voted_up = TRUE "
+        "ORDER BY r.votes_up DESC LIMIT 1",
+        source, bq_project, params=(appid,),
+    )
+
+    for frame, col in [(funniest, "voted_up"), (most_dedicated, "voted_up")]:
+        if not frame.empty:
+            frame[col] = frame[col].astype(int)
 
     return {
         "longest": longest.iloc[0].to_dict() if not longest.empty else None,
-        "most_helpful": most_helpful.iloc[0].to_dict() if not most_helpful.empty else None,
-        "top_reviewer": top_reviewer.iloc[0].to_dict() if not top_reviewer.empty else None,
+        "funniest": funniest.iloc[0].to_dict() if not funniest.empty else None,
+        "most_dedicated": most_dedicated.iloc[0].to_dict() if not most_dedicated.empty else None,
+        "most_complicated": most_complicated.iloc[0].to_dict() if not most_complicated.empty else None,
     }
 
 
@@ -264,23 +276,27 @@ def main():
     st.caption("Player sentiment, engagement, and recommendation trends from Steam reviews.")
 
     with st.sidebar:
-        st.header("Data source")
+        st.header("🗄️ Data source")
         default_source_index = 0 if os.path.exists(DB_PATH) else 1
-        source = st.radio("Backend", ["Local (SQLite)", "BigQuery"], index=default_source_index)
-        source = "BigQuery" if source == "BigQuery" else "SQLite"
-        st.caption(
-            "Both backends serve the same data (BigQuery is synced from the "
-            "local database). The toggle demonstrates backend portability: "
-            "the whole dashboard runs through one data-access layer that "
-            "handles both engines' differences behind a single interface."
+        source_label = st.radio(
+            "Backend",
+            ["💾 Local (SQLite)", "☁️ BigQuery"],
+            index=default_source_index,
+            help="Both backends serve the same data (BigQuery is synced from "
+                 "the local database). This toggle demonstrates backend "
+                 "portability: the whole dashboard runs through one "
+                 "data-access layer that handles both engines' differences "
+                 "behind a single interface.",
         )
+        source = "BigQuery" if "BigQuery" in source_label else "SQLite"
         bq_project = None
         if source == "BigQuery":
-            bq_project = st.text_input("GCP project ID", value="steam-analytics-503010")
-            st.caption(
-                "Requires `gcloud auth application-default login` to have been "
-                "run on this machine, and the dataset migrated via "
-                "`migration/migrate_to_bigquery.py`."
+            bq_project = st.text_input(
+                "GCP project ID",
+                value="steam-analytics-503010",
+                help="Requires `gcloud auth application-default login` locally, "
+                     "or a configured service account when deployed. Dataset "
+                     "migrated via `migration/migrate_to_bigquery.py`.",
             )
 
         if st.button("🔄 Refresh data", help="Clears cached query results and re-reads from the database"):
@@ -288,7 +304,7 @@ def main():
             st.rerun()
 
         st.divider()
-        st.header("Filters")
+        st.header("🎯 Filters")
 
     try:
         games = get_games(source, bq_project)
@@ -502,9 +518,9 @@ def main():
 
         st.subheader("🏆 Fun stats")
         fun_stats = load_fun_stats(appid, source, bq_project)
-        fcol1, fcol2, fcol3 = st.columns(3)
 
-        with fcol1:
+        frow1_col1, frow1_col2 = st.columns(2)
+        with frow1_col1:
             with st.container(border=True):
                 st.markdown("**📏 Longest review**")
                 longest = fun_stats["longest"]
@@ -516,29 +532,48 @@ def main():
                 else:
                     st.caption("No data.")
 
-        with fcol2:
+        with frow1_col2:
             with st.container(border=True):
-                st.markdown("**⭐ Most helpful review ever**")
-                most_helpful = fun_stats["most_helpful"]
-                if most_helpful:
-                    verdict = "👍 Recommended" if most_helpful["voted_up"] else "👎 Not recommended"
-                    st.metric("Helpful votes", f"{int(most_helpful['votes_up']):,}")
+                st.markdown("**😂 Funniest review**")
+                funniest = fun_stats["funniest"]
+                if funniest:
+                    verdict = "👍 Recommended" if funniest["voted_up"] else "👎 Not recommended"
+                    st.metric("Funny votes", f"{int(funniest['votes_funny']):,}")
                     st.caption(verdict)
                     with st.expander("Read it"):
-                        st.write(most_helpful["review_text"][:2000] +
-                                 ("..." if len(most_helpful["review_text"]) > 2000 else ""))
+                        st.write(funniest["review_text"][:2000] +
+                                 ("..." if len(funniest["review_text"]) > 2000 else ""))
                 else:
                     st.caption("No data.")
 
-        with fcol3:
+        frow2_col1, frow2_col2 = st.columns(2)
+        with frow2_col1:
             with st.container(border=True):
-                st.markdown("**✍️ Most prolific reviewer**")
-                top_reviewer = fun_stats["top_reviewer"]
-                if top_reviewer:
-                    st.metric("Reviews written", f"{int(top_reviewer['review_count']):,}")
-                    st.caption(f"Steam ID: `{top_reviewer['steamid']}`")
+                st.markdown("**⏱️ Most dedicated reviewer**")
+                most_dedicated = fun_stats["most_dedicated"]
+                if most_dedicated:
+                    hours = most_dedicated["playtime_at_review"] / 60
+                    verdict = "👍 Recommended" if most_dedicated["voted_up"] else "👎 Not recommended"
+                    st.metric("Hours played before reviewing", f"{hours:,.0f}")
+                    st.caption(verdict)
+                    with st.expander("Read it"):
+                        st.write(most_dedicated["review_text"][:2000] +
+                                 ("..." if len(most_dedicated["review_text"]) > 2000 else ""))
                 else:
                     st.caption("No data.")
+
+        with frow2_col2:
+            with st.container(border=True):
+                st.markdown('**🎭 Most "it\'s complicated" review**')
+                st.caption("Sounds negative, still recommends it. See the sentiment-vs-recommendation finding below.")
+                most_complicated = fun_stats["most_complicated"]
+                if most_complicated:
+                    st.metric("Helpful votes", f"{int(most_complicated['votes_up']):,}")
+                    with st.expander("Read it"):
+                        st.write(most_complicated["review_text"][:2000] +
+                                 ("..." if len(most_complicated["review_text"]) > 2000 else ""))
+                else:
+                    st.caption("No negative-toned-but-recommended reviews found for this game.")
 
         st.divider()
 
